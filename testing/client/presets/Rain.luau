@@ -23,11 +23,17 @@ return Ambience.preset({
 			FogEnd = 1800,
 			FogStart = 80,
 			FogColor = Color3.fromRGB(95, 103, 120),
-			Brightness = 1.4,
+			Brightness = function(current: number)
+				return current * 0.5
+			end,
 		},
 		Atmosphere = {
-			Density = 0.45,
-			Haze = 3,
+			Density = function(current: number)
+				return current + 0.15
+			end,
+			Haze = function(current: number)
+				return current * 1.5
+			end,
 			Color = Color3.fromRGB(150, 165, 180),
 		},
 	},

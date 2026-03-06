@@ -67,7 +67,7 @@ export type LightingData = {
 	}?,
 }
 
-export type ValueOrFn<T> = T | (() -> T)
+export type ValueOrFn<T> = T | ((T) -> T)
 
 type ResolveProps = { [string]: ValueOrFn<any>? }
 
@@ -227,49 +227,70 @@ local function lerp_lightingdata(data_a: LightingData, data_b: LightingData, alp
 	return result
 end
 
-local function resolve_prop(value: ValueOrFn<any>): (any, boolean)
-	if typeof(value) == "function" then
-		local ok, resolved = pcall(value :: () -> any)
-		if not ok then
-			warn(`Lighting resolver function failed: {resolved}`)
-			return nil, true
-		end
-		return resolved, true
-	end
-	return value, false
-end
-
-local function merge_resolved_layer(
-	layer: ResolvableLightingData,
-	resolved: LightingData,
-	has_dynamic: boolean
-): boolean
-	for instance_type, properties in pairs(layer) do
-		if properties ~= nil then
-			if not resolved[instance_type] then
-				resolved[instance_type] = {}
-			end
-			local destination = resolved[instance_type]
-			for key, raw_value in pairs(properties) do
-				if destination[key] == nil and raw_value ~= nil then
-					local value, is_dynamic = resolve_prop(raw_value)
-					has_dynamic = has_dynamic or is_dynamic
+local function resolve_lighting(layers: { ResolvableLightingData }): (LightingData, boolean)
+	local key_map: { [string]: { [string]: boolean } } = {}
+	for _, layer in ipairs(layers) do
+		for instance_type, properties in pairs(layer) do
+			if properties ~= nil then
+				if not key_map[instance_type] then
+					key_map[instance_type] = {}
+				end
+				for key, value in pairs(properties) do
 					if value ~= nil then
-						destination[key] = value
+						key_map[instance_type][key] = true
 					end
 				end
 			end
 		end
 	end
-	return has_dynamic
-end
 
-local function resolve_lighting(layers: { ResolvableLightingData }): (LightingData, boolean)
 	local resolved = {} :: LightingData
 	local has_dynamic = false
-	for _, layer in ipairs(layers) do
-		has_dynamic = merge_resolved_layer(layer, resolved, has_dynamic)
+
+	for instance_type, keys in pairs(key_map) do
+		for key, _ in pairs(keys) do
+			local modifiers: { (any) -> any } = {}
+			local base_value: any = nil
+			local has_base = false
+
+			-- Pass 1 (top-down): collect modifier functions until first fixed base value.
+			for _, layer in ipairs(layers) do
+				local properties = layer[instance_type]
+				local raw_value = properties and properties[key]
+				if raw_value ~= nil then
+					if typeof(raw_value) == "function" then
+						has_dynamic = true
+						table.insert(modifiers, raw_value :: (any) -> any)
+					else
+						base_value = raw_value
+						has_base = true
+						break
+					end
+				end
+			end
+
+			if has_base then
+				local current = base_value
+				-- Pass 2 (bottom-up): apply modifiers from low to high priority.
+				for index = #modifiers, 1, -1 do
+					local ok, result = pcall(modifiers[index], current)
+					if not ok then
+						warn(`Lighting modifier failed at {instance_type}.{key}: {result}`)
+					else
+						current = result
+					end
+				end
+
+				if current ~= nil then
+					if not resolved[instance_type] then
+						resolved[instance_type] = {}
+					end
+					resolved[instance_type][key] = current
+				end
+			end
+		end
 	end
+
 	return resolved, has_dynamic
 end
 

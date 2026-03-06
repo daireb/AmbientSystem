@@ -108,23 +108,33 @@ return Ambience.preset({
 })
 ```
 
-### Dynamic lighting values
+### Dynamic and modifier lighting values
 
 Any lighting property can be a function instead of a static value. Functions are
-evaluated every frame while the layer is active.
+evaluated every frame while the layer is active, and receive the current built-up
+value for that property.
 
 ```lua
 return Ambience.preset({
-    priority = -10,
+    priority = 10,
     lighting = {
         Lighting = {
-            ClockTime = function()
+            -- Modifier: darken whatever lower-priority layers set.
+            Brightness = function(current)
+                return current * 0.5
+            end,
+
+            -- Dynamic absolute value: ignore the current value.
+            ClockTime = function(_current)
                 return workspace:GetServerTimeNow() % 24
             end,
         },
     },
 })
 ```
+
+If no lower-priority fixed value exists for a property, modifier functions for that
+property are skipped.
 
 ## API
 
@@ -189,10 +199,15 @@ The Track builder module. Used to create sound tracks for presets.
 
 ## How layering works
 
-**Lighting**: Active layers are sorted by priority (highest first). For each
-property, the highest-priority layer that defines it wins. Properties not defined
-by any layer are left at their Roblox defaults. Transitions smoothly interpolate
-between the old and new resolved state.
+**Lighting**: Active layers are sorted by priority (highest first). Resolution is
+two-pass per property:
+- top-down to find the highest-priority fixed base value while collecting functions
+- bottom-up to apply collected functions from low to high priority
+
+This supports relative modifiers like rain darkening day/night differently while
+keeping fixed overrides simple. Properties not defined by any layer are left at
+their Roblox defaults. Transitions smoothly interpolate between the old and new
+resolved state.
 
 **Sound**: All active layers' tracks play simultaneously. Each layer's tracks
 share a transition volume that fades in on push and out on pop, independent of
