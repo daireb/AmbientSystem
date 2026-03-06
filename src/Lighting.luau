@@ -1,0 +1,283 @@
+--!strict
+local Lighting = game:GetService("Lighting")
+
+export type LightingData = {
+	Lighting: {
+		Ambient: Color3?,
+		Brightness: number?,
+
+		ColorShift_Bottom: Color3?,
+		ColorShift_Top: Color3?,
+
+		OutdoorAmbient: Color3?,
+		ShadowSoftness: number?,
+
+		GeographicLatitude: number?,
+		ClockTime: number?,
+		TimeOfDay: string?,
+
+		FogEnd: number?,
+		FogStart: number?,
+		FogColor: Color3?,
+	}?,
+	Atmosphere: {
+		Density: number?,
+		Offset: number?,
+
+		Color: Color3?,
+		Decay: Color3?,
+		Glare: number?,
+		Haze: number?,
+	}?,
+	Sky: {
+		CelestialBodiesShown: boolean?,
+		MoonAngularSize: number?,
+		MoonTextureId: string?,
+		SunAngularSize: number?,
+		SunTextureId: string?,
+		StarCount: number?,
+
+		SkyboxBk: string?,
+		SkyboxDn: string?,
+		SkyboxFt: string?,
+		SkyboxLf: string?,
+		SkyboxRt: string?,
+		SkyboxUp: string?,
+	}?,
+	Clouds: {
+		Cover: number?,
+		Density: number?,
+		Enabled: boolean?,
+		Color: Color3?,
+	}?,
+	SunRaysEffect: {
+		Intensity: number?,
+		Spread: number?,
+		Enabled: boolean?,
+	}?,
+	ColorCorrectionEffect: {
+		Brightness: number?,
+		Contrast: number?,
+		Saturation: number?,
+		TintColor: Color3?,
+		Enabled: boolean?,
+	}?,
+	Workspace: {
+		GlobalWind: Vector3?,
+	}?,
+}
+
+export type ValueOrFn<T> = T | (() -> T)
+
+type ResolveProps = { [string]: ValueOrFn<any>? }
+
+export type ResolvableLightingData = {
+	Lighting: ResolveProps?,
+	Atmosphere: ResolveProps?,
+	Sky: ResolveProps?,
+	Clouds: ResolveProps?,
+	SunRaysEffect: ResolveProps?,
+	ColorCorrectionEffect: ResolveProps?,
+	Workspace: ResolveProps?,
+}
+
+local function write_to_instance(instance_type: string, properties_table: { [string]: any }?)
+	local instance: Instance = nil
+	local parent: Instance? = nil
+
+	if instance_type == "Lighting" then
+		instance = Lighting
+	elseif instance_type == "Workspace" then
+		instance = workspace
+	elseif instance_type == "Clouds" then
+		instance = workspace.Terrain:FindFirstChildOfClass("Clouds")
+		parent = workspace.Terrain
+	else
+		instance = Lighting:FindFirstChildOfClass(instance_type)
+		parent = Lighting
+	end
+
+	if properties_table then
+		if not instance then
+			local success, result = pcall(Instance.new, instance_type)
+			if not success then
+				error(`Lighting: Failed to create instance of type "{instance_type}": {result}`)
+			end
+
+			instance = result;
+			(instance :: never).Parent = parent
+		end
+
+		for key, value in pairs(properties_table) do
+			(instance :: never)[key] = value
+		end
+	else
+		if instance and instance_type ~= "Lighting" and instance_type ~= "Workspace" then
+			instance:Destroy()
+		end
+	end
+end
+
+local function write_lightingdata(data: LightingData)
+	for instance_type, tab in pairs(data) do
+		write_to_instance(instance_type, tab :: { [string]: any }?)
+	end
+end
+
+local function clear_stale_instances(data: LightingData)
+	local class_data: { [string]: { [string]: any }? } = {
+		Atmosphere = data.Atmosphere :: { [string]: any }?,
+		Sky = data.Sky :: { [string]: any }?,
+		SunRaysEffect = data.SunRaysEffect :: { [string]: any }?,
+		ColorCorrectionEffect = data.ColorCorrectionEffect :: { [string]: any }?,
+		Clouds = data.Clouds :: { [string]: any }?,
+	}
+
+	for class_name, properties in pairs(class_data) do
+		if properties == nil then
+			write_to_instance(class_name, nil)
+		end
+	end
+end
+
+local function clear_lighting()
+	Lighting:ClearAllChildren()
+	local clouds = workspace.Terrain:FindFirstChildOfClass("Clouds")
+	if clouds then
+		clouds:Destroy()
+	end
+end
+
+local function do_tween(duration: number, update_function: (number) -> boolean?)
+	update_function(0)
+
+	local start = os.clock()
+	while true do
+		task.wait()
+		local delta = os.clock() - start
+		local alpha = delta / duration
+		if alpha >= 1 then
+			break
+		end
+
+		local ret = update_function(alpha)
+		if ret == false then
+			return
+		end
+	end
+	update_function(1)
+end
+
+local function lerp_lightingdata(data_a: LightingData, data_b: LightingData, alpha: number): LightingData
+	local key_map = {}
+	for instance_type, tab in pairs(data_a) do
+		key_map[instance_type] = {}
+		for key, _ in pairs(tab) do
+			key_map[instance_type][key] = true
+		end
+	end
+
+	for instance_type, tab in pairs(data_b) do
+		if not key_map[instance_type] then
+			key_map[instance_type] = {}
+		end
+		for key, _ in pairs(tab) do
+			key_map[instance_type][key] = true
+		end
+	end
+
+	local result = {} :: LightingData
+	for instance_type, key_map_for_type in pairs(key_map) do
+		result[instance_type] = {}
+
+		for key, _ in pairs(key_map_for_type) do
+			local value_a = data_a[instance_type] and data_a[instance_type][key]
+			local value_b = data_b[instance_type] and data_b[instance_type][key]
+
+			if value_a == nil then
+				result[instance_type][key] = value_b
+				continue
+			elseif value_b == nil then
+				result[instance_type][key] = value_a
+				continue
+			end
+
+			if typeof(value_a) ~= typeof(value_b) then
+				error(
+					string.format(
+						"Cannot interpolate between different types at %s.%s: %s and %s",
+						instance_type,
+						key,
+						typeof(value_a),
+						typeof(value_b)
+					)
+				)
+			end
+
+			if typeof(value_a) == "number" then
+				result[instance_type][key] = math.lerp(value_a, value_b, alpha)
+			elseif typeof(value_a) == "Color3" or typeof(value_a) == "Vector3" then
+				result[instance_type][key] = (value_a :: never):Lerp(value_b, alpha)
+			else
+				result[instance_type][key] = if alpha < 0.5 then value_a else value_b
+			end
+		end
+	end
+
+	return result
+end
+
+local function resolve_prop(value: ValueOrFn<any>): (any, boolean)
+	if typeof(value) == "function" then
+		local ok, resolved = pcall(value :: () -> any)
+		if not ok then
+			warn(`Lighting resolver function failed: {resolved}`)
+			return nil, true
+		end
+		return resolved, true
+	end
+	return value, false
+end
+
+local function merge_resolved_layer(
+	layer: ResolvableLightingData,
+	resolved: LightingData,
+	has_dynamic: boolean
+): boolean
+	for instance_type, properties in pairs(layer) do
+		if properties ~= nil then
+			if not resolved[instance_type] then
+				resolved[instance_type] = {}
+			end
+			local destination = resolved[instance_type]
+			for key, raw_value in pairs(properties) do
+				if destination[key] == nil and raw_value ~= nil then
+					local value, is_dynamic = resolve_prop(raw_value)
+					has_dynamic = has_dynamic or is_dynamic
+					if value ~= nil then
+						destination[key] = value
+					end
+				end
+			end
+		end
+	end
+	return has_dynamic
+end
+
+local function resolve_lighting(layers: { ResolvableLightingData }): (LightingData, boolean)
+	local resolved = {} :: LightingData
+	local has_dynamic = false
+	for _, layer in ipairs(layers) do
+		has_dynamic = merge_resolved_layer(layer, resolved, has_dynamic)
+	end
+	return resolved, has_dynamic
+end
+
+return {
+	resolve_lighting = resolve_lighting,
+	write_lightingdata = write_lightingdata,
+	clear_stale_instances = clear_stale_instances,
+	clear_lighting = clear_lighting,
+	do_tween = do_tween,
+	lerp_lightingdata = lerp_lightingdata,
+}

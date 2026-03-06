@@ -1,11 +1,8 @@
 --!strict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
 local Ambience = require(ReplicatedStorage.Package)
-local Soundscape = Ambience.Soundscape
-local Track = Ambience.SoundscapeTrack
+local Track = Ambience.Track
 
--- Create sound instances
 local function makeSound(id: string, volume: number, looped: boolean?): Sound
 	local sound = Instance.new("Sound")
 	sound.SoundId = id
@@ -14,24 +11,28 @@ local function makeSound(id: string, volume: number, looped: boolean?): Sound
 	return sound
 end
 
--- Rain ambient loop
 local rainAmbient = makeSound("rbxassetid://9064263922", 0.5, true)
-
--- Thunder sounds
 local thunderSounds = {
 	makeSound("rbxassetid://4961240438", 0.8),
 }
 
-local soundscape = Soundscape.new("rain", {
-	-- Main rain loop
-	Track.looping(rainAmbient)
-		:ModifyVolume(0.7)
-		:AutoFadeInOut(3),
-
-	-- Occasional thunder with random delays
-	Track.random(thunderSounds)
-		:ModifyVolume(0.6)
-		:AddRandomDelay(10, 30),
+return Ambience.preset({
+	priority = 10,
+	lighting = {
+		Lighting = {
+			FogEnd = 1800,
+			FogStart = 80,
+			FogColor = Color3.fromRGB(95, 103, 120),
+			Brightness = 1.4,
+		},
+		Atmosphere = {
+			Density = 0.45,
+			Haze = 3,
+			Color = Color3.fromRGB(150, 165, 180),
+		},
+	},
+	sounds = {
+		Track.looping(rainAmbient):ModifyVolume(0.7):AutoFadeInOut(3),
+		Track.random(thunderSounds):ModifyVolume(0.6):AddRandomDelay(10, 30),
+	},
 })
-
-return soundscape

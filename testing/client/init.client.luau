@@ -1,26 +1,14 @@
 --!strict
---[[
-	Ambience Test Client
-	
-	A simple testing UI for the Ambience library.
-	Provides buttons to switch between lighting scenes and soundscapes,
-	with sliders to control transition times.
-]]
-
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Ambience = require(ReplicatedStorage.Package)
+Ambience.registerFromFolder(script.presets)
 
--- Register all presets
-Ambience.Lighting.RegisterFromFolder(script.presets.lighting)
-Ambience.Sound.RegisterFromFolder(script.presets.soundscapes)
-
--- UI Constants
-local PANEL_WIDTH = 220
+local PANEL_WIDTH = 260
 local PANEL_PADDING = 12
-local BUTTON_HEIGHT = 32
-local SLIDER_HEIGHT = 24
+local BUTTON_HEIGHT = 30
 local LABEL_HEIGHT = 20
 local SPACING = 8
 
@@ -37,13 +25,13 @@ local COLORS = {
 	stopButtonHover = Color3.fromRGB(150, 60, 60),
 }
 
--- State
-local currentTweenTime = 1
-local currentFadeTime = 1
-local currentLightingLabel: TextLabel? = nil
-local currentSoundLabel: TextLabel? = nil
+local transitionTime = 1
+local activeLabel: TextLabel? = nil
+local presetButtons: { [string]: TextButton } = {}
 
--- UI Helpers
+local PRESETS = { "Day", "Night", "Sunset", "Forest", "Rain", "Wind" }
+local SET_PRESETS = { "Day", "Night", "Sunset" }
+
 local function createFrame(props: {
 	name: string,
 	size: UDim2,
@@ -54,7 +42,7 @@ local function createFrame(props: {
 	local frame = Instance.new("Frame")
 	frame.Name = props.name
 	frame.Size = props.size
-	frame.Position = props.position or UDim2.new(0, 0, 0, 0)
+	frame.Position = props.position or UDim2.new()
 	frame.BackgroundColor3 = props.color or COLORS.background
 	frame.BorderSizePixel = 0
 	frame.Parent = props.parent
@@ -73,7 +61,7 @@ local function createLabel(props: {
 	label.Name = props.name
 	label.Text = props.text
 	label.Size = props.size
-	label.Position = props.position or UDim2.new(0, 0, 0, 0)
+	label.Position = props.position or UDim2.new()
 	label.BackgroundTransparency = 1
 	label.TextColor3 = props.color or COLORS.text
 	label.TextSize = 14
@@ -97,7 +85,7 @@ local function createButton(props: {
 	button.Name = props.name
 	button.Text = props.text
 	button.Size = props.size
-	button.Position = props.position or UDim2.new(0, 0, 0, 0)
+	button.Position = props.position or UDim2.new()
 	button.BackgroundColor3 = props.color or COLORS.button
 	button.BorderSizePixel = 0
 	button.TextColor3 = COLORS.text
@@ -116,44 +104,35 @@ local function createButton(props: {
 	button.MouseEnter:Connect(function()
 		button.BackgroundColor3 = hoverColor
 	end)
-
 	button.MouseLeave:Connect(function()
 		button.BackgroundColor3 = baseColor
 	end)
-
 	button.MouseButton1Click:Connect(props.onClick)
 
 	return button
 end
 
 local function createSlider(props: {
-	name: string,
-	label: string,
-	min: number,
-	max: number,
-	default: number,
 	size: UDim2,
-	position: UDim2?,
-	parent: GuiObject?,
-	onChanged: (value: number) -> (),
+	position: UDim2,
+	parent: GuiObject,
 }): Frame
 	local container = createFrame({
-		name = props.name,
+		name = "TransitionSlider",
 		size = props.size,
 		position = props.position,
-		color = Color3.fromRGB(0, 0, 0),
+		color = Color3.new(),
 		parent = props.parent,
 	})
 	container.BackgroundTransparency = 1
 
-	local labelText = createLabel({
+	local textLabel = createLabel({
 		name = "Label",
-		text = `{props.label}: {props.default}s`,
+		text = `Transition: {transitionTime}s`,
 		size = UDim2.new(1, 0, 0, LABEL_HEIGHT),
 		color = COLORS.textDim,
 		parent = container,
 	})
-	labelText.TextSize = 12
 
 	local sliderBg = createFrame({
 		name = "SliderBg",
@@ -163,61 +142,46 @@ local function createSlider(props: {
 		parent = container,
 	})
 
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 4)
-	corner.Parent = sliderBg
+	local bgCorner = Instance.new("UICorner")
+	bgCorner.CornerRadius = UDim.new(0, 4)
+	bgCorner.Parent = sliderBg
 
-	local sliderFill = createFrame({
+	local fill = createFrame({
 		name = "Fill",
-		size = UDim2.new((props.default - props.min) / (props.max - props.min), 0, 1, 0),
+		size = UDim2.new(transitionTime / 5, 0, 1, 0),
+		position = UDim2.new(),
 		color = COLORS.sliderFill,
 		parent = sliderBg,
 	})
 
 	local fillCorner = Instance.new("UICorner")
 	fillCorner.CornerRadius = UDim.new(0, 4)
-	fillCorner.Parent = sliderFill
+	fillCorner.Parent = fill
 
-	-- Slider interaction
 	local dragging = false
 
 	local function updateSlider(inputX: number)
 		local relativeX = math.clamp((inputX - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
-		local value = props.min + relativeX * (props.max - props.min)
-		value = math.floor(value * 10) / 10 -- Round to 1 decimal
-
-		sliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
-		labelText.Text = `{props.label}: {value}s`
-		props.onChanged(value)
+		transitionTime = math.floor((relativeX * 5) * 10) / 10
+		fill.Size = UDim2.new(relativeX, 0, 1, 0)
+		textLabel.Text = `Transition: {transitionTime}s`
 	end
 
 	sliderBg.InputBegan:Connect(function(input)
-		if
-			input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch
-		then
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
 			dragging = true
 			updateSlider(input.Position.X)
 		end
 	end)
 
 	sliderBg.InputEnded:Connect(function(input)
-		if
-			input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch
-		then
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
 			dragging = false
 		end
 	end)
 
 	sliderBg.InputChanged:Connect(function(input)
-		if
-			dragging
-			and (
-				input.UserInputType == Enum.UserInputType.MouseMovement
-				or input.UserInputType == Enum.UserInputType.Touch
-			)
-		then
+		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
 			updateSlider(input.Position.X)
 		end
 	end)
@@ -225,48 +189,33 @@ local function createSlider(props: {
 	return container
 end
 
-local function createSection(props: {
-	name: string,
-	title: string,
-	yOffset: number,
-	parent: GuiObject?,
-}): (Frame, number)
-	local section = createFrame({
-		name = props.name,
-		size = UDim2.new(1, -PANEL_PADDING * 2, 0, 0), -- Height set dynamically
-		position = UDim2.new(0, PANEL_PADDING, 0, props.yOffset),
-		color = Color3.fromRGB(0, 0, 0),
-		parent = props.parent,
-	})
-	section.BackgroundTransparency = 1
-
-	createLabel({
-		name = "Title",
-		text = props.title,
-		size = UDim2.new(1, 0, 0, LABEL_HEIGHT),
-		color = COLORS.text,
-		parent = section,
-	})
-
-	return section, LABEL_HEIGHT + SPACING
+local function contains(list: { string }, value: string): boolean
+	return table.find(list, value) ~= nil
 end
 
--- Create the main UI
+local function refreshActiveLabel()
+	local ids = Ambience.getActive()
+	if activeLabel then
+		activeLabel.Text = if #ids == 0 then "Active: None" else `Active: {table.concat(ids, ", ")}`
+	end
+	for id, button in pairs(presetButtons) do
+		button.BackgroundColor3 = if contains(ids, id) then COLORS.buttonActive else COLORS.button
+	end
+end
+
 local function createUI()
 	local player = Players.LocalPlayer
 	local playerGui = player:WaitForChild("PlayerGui") :: PlayerGui
 
 	local screenGui = Instance.new("ScreenGui")
-	screenGui.Name = "AmbienceTest"
+	screenGui.Name = "AmbienceV2Test"
 	screenGui.ResetOnSpawn = false
-	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	screenGui.Parent = playerGui
 
-	-- Main panel
 	local panel = createFrame({
 		name = "Panel",
-		size = UDim2.new(0, PANEL_WIDTH, 0, 400),
-		position = UDim2.new(0, 20, 0.5, -200),
+		size = UDim2.new(0, PANEL_WIDTH, 0, 530),
+		position = UDim2.new(0, 20, 0.5, -265),
 		color = COLORS.background,
 		parent = screenGui,
 	})
@@ -275,178 +224,108 @@ local function createUI()
 	panelCorner.CornerRadius = UDim.new(0, 10)
 	panelCorner.Parent = panel
 
-	-- Header
+	local y = PANEL_PADDING
+
 	local header = createLabel({
 		name = "Header",
-		text = "Ambience Test",
-		size = UDim2.new(1, -PANEL_PADDING * 2, 0, 30),
-		position = UDim2.new(0, PANEL_PADDING, 0, PANEL_PADDING),
-		color = COLORS.text,
+		text = "Ambience v2 Test",
+		size = UDim2.new(1, -PANEL_PADDING * 2, 0, 28),
+		position = UDim2.new(0, PANEL_PADDING, 0, y),
 		parent = panel,
 	})
-	header.TextSize = 18
 	header.Font = Enum.Font.GothamBold
+	header.TextSize = 18
 	header.TextXAlignment = Enum.TextXAlignment.Center
+	y += 28 + SPACING
 
-	local yOffset = PANEL_PADDING + 30 + SPACING
-
-	-- Lighting Section
-	local lightingSection, lightingOffset = createSection({
-		name = "LightingSection",
-		title = "Lighting",
-		yOffset = yOffset,
+	activeLabel = createLabel({
+		name = "ActiveLabel",
+		text = "Active: None",
+		size = UDim2.new(1, -PANEL_PADDING * 2, 0, LABEL_HEIGHT),
+		position = UDim2.new(0, PANEL_PADDING, 0, y),
+		color = COLORS.textDim,
 		parent = panel,
 	})
+	activeLabel.TextSize = 12
+	y += LABEL_HEIGHT + SPACING
 
-	currentLightingLabel = createLabel({
-		name = "CurrentLabel",
-		text = "Current: None",
-		size = UDim2.new(1, 0, 0, LABEL_HEIGHT),
-		position = UDim2.new(0, 0, 0, lightingOffset),
-		color = COLORS.textDim,
-		parent = lightingSection,
-	})
-	currentLightingLabel.TextSize = 12
-	lightingOffset += LABEL_HEIGHT + SPACING
-
-	-- Lighting buttons
-	local lightingPresets = { "day", "sunset", "night" }
-	for i, preset in ipairs(lightingPresets) do
-		createButton({
-			name = preset .. "Button",
-			text = preset:sub(1, 1):upper() .. preset:sub(2),
-			size = UDim2.new(1, 0, 0, BUTTON_HEIGHT),
-			position = UDim2.new(0, 0, 0, lightingOffset),
-			parent = lightingSection,
-			onClick = function()
-				Ambience.Lighting.SetActive(preset, { tweenTime = currentTweenTime })
-				if currentLightingLabel then
-					currentLightingLabel.Text = `Current: {preset:sub(1, 1):upper()}{preset:sub(2)}`
-				end
-			end,
-		})
-		lightingOffset += BUTTON_HEIGHT + SPACING
-	end
-
-	-- Tween time slider
 	createSlider({
-		name = "TweenSlider",
-		label = "Tween Time",
-		min = 0,
-		max = 5,
-		default = currentTweenTime,
-		size = UDim2.new(1, 0, 0, SLIDER_HEIGHT + LABEL_HEIGHT),
-		position = UDim2.new(0, 0, 0, lightingOffset),
-		parent = lightingSection,
-		onChanged = function(value)
-			currentTweenTime = value
-		end,
-	})
-	lightingOffset += SLIDER_HEIGHT + LABEL_HEIGHT + SPACING
-
-	-- Stop lighting button
-	createButton({
-		name = "StopLightingButton",
-		text = "Stop Lighting",
-		size = UDim2.new(1, 0, 0, BUTTON_HEIGHT),
-		position = UDim2.new(0, 0, 0, lightingOffset),
-		color = COLORS.stopButton,
-		hoverColor = COLORS.stopButtonHover,
-		parent = lightingSection,
-		onClick = function()
-			Ambience.Lighting.SetActive(nil)
-			if currentLightingLabel then
-				currentLightingLabel.Text = "Current: None"
-			end
-		end,
-	})
-	lightingOffset += BUTTON_HEIGHT + SPACING
-
-	lightingSection.Size = UDim2.new(1, -PANEL_PADDING * 2, 0, lightingOffset)
-	yOffset += lightingOffset + SPACING * 2
-
-	-- Sound Section
-	local soundSection, soundOffset = createSection({
-		name = "SoundSection",
-		title = "Sound",
-		yOffset = yOffset,
+		size = UDim2.new(1, -PANEL_PADDING * 2, 0, LABEL_HEIGHT + 16),
+		position = UDim2.new(0, PANEL_PADDING, 0, y),
 		parent = panel,
 	})
+	y += LABEL_HEIGHT + 16 + SPACING * 2
 
-	currentSoundLabel = createLabel({
-		name = "CurrentLabel",
-		text = "Current: None",
-		size = UDim2.new(1, 0, 0, LABEL_HEIGHT),
-		position = UDim2.new(0, 0, 0, soundOffset),
-		color = COLORS.textDim,
-		parent = soundSection,
+	createLabel({
+		name = "SetLabel",
+		text = "Set (single active preset)",
+		size = UDim2.new(1, -PANEL_PADDING * 2, 0, LABEL_HEIGHT),
+		position = UDim2.new(0, PANEL_PADDING, 0, y),
+		parent = panel,
 	})
-	currentSoundLabel.TextSize = 12
-	soundOffset += LABEL_HEIGHT + SPACING
+	y += LABEL_HEIGHT + SPACING
 
-	-- Sound buttons
-	local soundPresets = { "forest", "rain", "wind" }
-	for i, preset in ipairs(soundPresets) do
+	for _, id in ipairs(SET_PRESETS) do
 		createButton({
-			name = preset .. "Button",
-			text = preset:sub(1, 1):upper() .. preset:sub(2),
-			size = UDim2.new(1, 0, 0, BUTTON_HEIGHT),
-			position = UDim2.new(0, 0, 0, soundOffset),
-			parent = soundSection,
+			name = `Set{id}`,
+			text = `Set {id}`,
+			size = UDim2.new(1, -PANEL_PADDING * 2, 0, BUTTON_HEIGHT),
+			position = UDim2.new(0, PANEL_PADDING, 0, y),
+			parent = panel,
 			onClick = function()
-				Ambience.Sound.SetActive(preset, { fadeTime = currentFadeTime })
-				if currentSoundLabel then
-					currentSoundLabel.Text = `Current: {preset:sub(1, 1):upper()}{preset:sub(2)}`
-				end
+				Ambience.set(id, { transition = transitionTime })
+				refreshActiveLabel()
 			end,
 		})
-		soundOffset += BUTTON_HEIGHT + SPACING
+		y += BUTTON_HEIGHT + SPACING
 	end
 
-	-- Fade time slider
-	createSlider({
-		name = "FadeSlider",
-		label = "Fade Time",
-		min = 0,
-		max = 5,
-		default = currentFadeTime,
-		size = UDim2.new(1, 0, 0, SLIDER_HEIGHT + LABEL_HEIGHT),
-		position = UDim2.new(0, 0, 0, soundOffset),
-		parent = soundSection,
-		onChanged = function(value)
-			currentFadeTime = value
-		end,
+	createLabel({
+		name = "PushPopLabel",
+		text = "Push/Pop Layers",
+		size = UDim2.new(1, -PANEL_PADDING * 2, 0, LABEL_HEIGHT),
+		position = UDim2.new(0, PANEL_PADDING, 0, y),
+		parent = panel,
 	})
-	soundOffset += SLIDER_HEIGHT + LABEL_HEIGHT + SPACING
+	y += LABEL_HEIGHT + SPACING
 
-	-- Stop sound button
+	for _, id in ipairs(PRESETS) do
+		local button = createButton({
+			name = `Toggle{id}`,
+			text = id,
+			size = UDim2.new(1, -PANEL_PADDING * 2, 0, BUTTON_HEIGHT),
+			position = UDim2.new(0, PANEL_PADDING, 0, y),
+			parent = panel,
+			onClick = function()
+				local isActive = contains(Ambience.getActive(), id)
+				if isActive then
+					Ambience.pop(id, { transition = transitionTime })
+				else
+					Ambience.push(id, { transition = transitionTime })
+				end
+				refreshActiveLabel()
+			end,
+		})
+		presetButtons[id] = button
+		y += BUTTON_HEIGHT + SPACING
+	end
+
 	createButton({
-		name = "StopSoundButton",
-		text = "Stop Sound",
-		size = UDim2.new(1, 0, 0, BUTTON_HEIGHT),
-		position = UDim2.new(0, 0, 0, soundOffset),
+		name = "ClearAll",
+		text = "Clear All",
+		size = UDim2.new(1, -PANEL_PADDING * 2, 0, BUTTON_HEIGHT),
+		position = UDim2.new(0, PANEL_PADDING, 0, y),
 		color = COLORS.stopButton,
 		hoverColor = COLORS.stopButtonHover,
-		parent = soundSection,
+		parent = panel,
 		onClick = function()
-			Ambience.Sound.SetActive(nil)
-			if currentSoundLabel then
-				currentSoundLabel.Text = "Current: None"
-			end
+			Ambience.clear({ transition = transitionTime })
+			refreshActiveLabel()
 		end,
 	})
-	soundOffset += BUTTON_HEIGHT
 
-	soundSection.Size = UDim2.new(1, -PANEL_PADDING * 2, 0, soundOffset)
-	yOffset += soundOffset + PANEL_PADDING
-
-	-- Adjust panel height
-	panel.Size = UDim2.new(0, PANEL_WIDTH, 0, yOffset)
-	panel.Position = UDim2.new(0, 20, 0.5, -yOffset / 2)
-
-	return screenGui
+	RunService.Heartbeat:Connect(refreshActiveLabel)
+	refreshActiveLabel()
 end
 
--- Initialize
 createUI()
-print("[AmbienceTest] Test UI initialized")
