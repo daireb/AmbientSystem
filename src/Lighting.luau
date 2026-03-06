@@ -320,7 +320,6 @@ local function resolve_lighting(layers: { ResolvableLightingData }): (LightingDa
 		for key, _ in pairs(keys) do
 			local modifiers: { (any) -> any } = {}
 			local base_value: any = nil
-			local has_base = false
 
 			-- Pass 1 (top-down): collect modifier functions until first fixed base value.
 			for _, layer in ipairs(layers) do
@@ -332,31 +331,27 @@ local function resolve_lighting(layers: { ResolvableLightingData }): (LightingDa
 						table.insert(modifiers, raw_value :: (any) -> any)
 					else
 						base_value = raw_value
-						has_base = true
 						break
 					end
 				end
 			end
 
-			if has_base then
-				local current = base_value
-				-- Pass 2 (bottom-up): apply modifiers from low to high priority.
-				for index = #modifiers, 1, -1 do
-					local ok, result = pcall(modifiers[index], current)
-					if not ok then
-						warn(`Lighting modifier failed at {instance_type}.{key}: {result}`)
-					else
-						current = result
-					end
-				end
-
-				if current ~= nil then
-					if not resolved[instance_type] then
-						resolved[instance_type] = {}
-					end
-					resolved[instance_type][key] = current
-				end
+		local current = base_value
+		for index = #modifiers, 1, -1 do
+			local ok, result = pcall(modifiers[index], current)
+			if not ok then
+				warn(`Lighting modifier failed at {instance_type}.{key}: {result}`)
+			else
+				current = result
 			end
+		end
+
+		if current ~= nil then
+			if not resolved[instance_type] then
+				resolved[instance_type] = {}
+			end
+			resolved[instance_type][key] = current
+		end
 		end
 	end
 
