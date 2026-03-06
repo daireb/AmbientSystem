@@ -53,7 +53,13 @@ local function set_layer_tracks_volume(layer: LayerState, volume: number)
 	end
 end
 
-local function fade_layer_tracks(layer: LayerState, from_volume: number, to_volume: number, duration: number, stop_after: boolean)
+local function fade_layer_tracks(
+	layer: LayerState,
+	from_volume: number,
+	to_volume: number,
+	duration: number,
+	stop_after: boolean
+)
 	local sounds = layer.preset.sounds
 	if not sounds then
 		return
