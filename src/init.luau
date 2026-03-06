@@ -297,6 +297,10 @@ local function set(id: string, options: TransitionOptions?)
 	refresh_lighting(transition)
 end
 
+local function isActive(id: string): boolean
+	return find_active_layer_index(id) ~= nil
+end
+
 local function getActive(): { string }
 	local ids = {}
 	for _, layer in ipairs(active_layers) do
@@ -312,6 +316,7 @@ return {
 	pop = pop,
 	set = set,
 	clear = clear,
+	isActive = isActive,
 	getActive = getActive,
 	preset = preset,
 	Track = TrackModule,

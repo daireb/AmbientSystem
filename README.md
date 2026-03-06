@@ -156,6 +156,10 @@ Pop all active layers and push the given one. Convenience for single-preset game
 
 Pop all active layers.
 
+### `Ambience.isActive(id: string): boolean`
+
+Return whether a layer with the given id is currently active.
+
 ### `Ambience.getActive(): { string }`
 
 Return a list of currently active layer ids (highest priority first).
